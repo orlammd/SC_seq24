@@ -1,0 +1,921 @@
+diff -rupN seq24-0.9.0/SEQ24 seq24-0.9.0+letz+af/SEQ24
+--- seq24-0.9.0/SEQ24	2008-09-07 12:54:08.000000000 +0200
++++ seq24-0.9.0+letz+af/SEQ24	2009-03-19 15:49:10.000000000 +0100
+@@ -80,7 +80,14 @@ simple interface.
+ 	the spin widget labeled set.  
+ 	There are a total of 32 sets, for a total of 
+ 	1024 loops. 
+- 
++
++        * Mute groups
++
++	You can mute-unmute (according to the group definition) all traks
++	in the playing screen set, which is the only one having sequences playing
++	(like in live sequencers).
++
++
+ 	* BPM
+ 
+ 	The ; and ' keys will increase/decrease tempo as
+@@ -118,6 +125,11 @@ simple interface.
+ 	Holding 'Right Ctrl' will queue a on/off toggle for a 
+ 	sequence when the loop ends.
+ 
++        * keep queue
++
++	Pressing the key defined in the .seq24rc file will activate queue mode
++	until you press 'Right Ctrl'.
++
+  [3b] Options Window
+ 
+ 	This window allows us to select which sequence gets midi
+@@ -261,13 +273,26 @@ simple interface.
+         5  [0 0 0 0 0 0]  [1 1 176 1  80   95]  [0 0 0 0 0 0]
+         6  [0 0 0 0 0 0]  [1 1 176 1  96  111]  [0 0 0 0 0 0]
+         7  [0 0 0 0 0 0]  [1 1 176 1 112  127]  [0 0 0 0 0 0]
++        # mute in group
++       
++        This controls 32 groups of mutes in the same way as defined for [midi-control].
++        A group is a set of sequences that can change the playing state together.
++        Groups work with the 32 sequences in the playing screen set (see after).
++       
++
++        bpm up and down, screen set up and down.
++        replace, snapshot, queue, group mute active, group mute in learning mode
++        and set the actual screen set as playing ( see the end of 3a )
++
++        [mute-group]
++
++        Here there are the definitions of the state of the 32 sequeces
++        in the playing screen set when a group is selected.
++        group [state of the first 8 sequences] [second 8] [third 8] [fourth 8]
+ 
+         After the list of sequences and their midi events, you can 
+         set seq24 to handle midi events and change the following: 
+ 
+-        bpm up and down, screen set up and down.
+-        replace, snapshot, and queue ( see the end of 3a )
+-
+ 
+         * [midi-clock]
+ 
+@@ -279,8 +304,14 @@ simple interface.
+         
+         The keyboard control is a dump of the keys that seq24 
+         recognises and its corresponding sequence number. 
+-        There are also the modifier keys: replace, snapshot, 
+-        and queue ( see the end of 3a ).
++
++        * [keyboard-group]
++
++        Same as keyboard-control, but to control groups.
++
++        There are also the modifier keys: screen set up, down, play,
++        group on, group off, learn, replace, snapshot,
++        queue and keep queue ( see the end of 3a ).
+ 
+         To get the correct keys, run seq24 with --show_keys.
+ 
+diff -rupN seq24-0.9.0/src/globals.h seq24-0.9.0+letz+af/src/globals.h
+--- seq24-0.9.0/src/globals.h	2008-10-18 12:13:10.000000000 +0200
++++ seq24-0.9.0+letz+af/src/globals.h	2009-03-18 21:07:43.000000000 +0100
+@@ -33,6 +33,7 @@ using namespace std;
+ const int c_mainwnd_rows = 6;
+ const int c_mainwnd_cols = 10;
+ const int c_seqs_in_set = c_mainwnd_rows * c_mainwnd_cols;
++const int c_gmute_tracks = c_seqs_in_set * c_seqs_in_set;
+ const int c_max_sets = 60;
+ const int c_total_seqs = c_seqs_in_set * c_max_sets;
+ 
+diff -rupN seq24-0.9.0/src/mainwnd.cpp seq24-0.9.0+letz+af/src/mainwnd.cpp
+--- seq24-0.9.0/src/mainwnd.cpp	2008-11-27 18:40:01.000000000 +0100
++++ seq24-0.9.0+letz+af/src/mainwnd.cpp	2009-03-18 21:13:43.000000000 +0100
+@@ -674,6 +674,9 @@ mainwnd::on_key_release_event(GdkEventKe
+     if ( a_ev->keyval == m_mainperf->m_key_snapshot_1 ||
+             a_ev->keyval == m_mainperf->m_key_snapshot_2 )
+         m_mainperf->unset_sequence_control_status( c_status_snapshot );
++    if ( a_ev->keyval == m_mainperf->m_key_group_learn ){
++        m_mainperf->unset_mode_group_learn();
++    }
+ 
+     return false;
+ }
+@@ -723,7 +726,8 @@ mainwnd::on_key_press_event(GdkEventKey*
+                 m_mainperf->set_sequence_control_status( c_status_replace );
+             }
+             
+-            if (a_ev->keyval ==  m_mainperf->m_key_queue )
++              if ((a_ev->keyval ==  m_mainperf->m_key_queue )
++             || (a_ev->keyval == m_mainperf->m_key_keep_queue ))
+             {
+                 m_mainperf->set_sequence_control_status( c_status_queue );
+             }
+@@ -749,7 +753,26 @@ mainwnd::on_key_press_event(GdkEventKey*
+                 m_adjust_ss->set_value( m_mainperf->get_screenset()  );	
+                 m_entry_notes->set_text( * m_mainperf->get_screen_set_notepad(m_mainperf->get_screenset()  )); 
+             }
+-            
++             if ( a_ev->keyval == m_mainperf->m_key_set_playing_screenset ){
++                m_mainperf->set_playing_screenset();
++            }
++           
++            if ( a_ev->keyval == m_mainperf->m_key_group_on ){
++                m_mainperf->set_mode_group_mute();
++            }
++            if ( a_ev->keyval == m_mainperf->m_key_group_off ){
++                m_mainperf->unset_mode_group_mute();
++            }
++           
++            if ( a_ev->keyval == m_mainperf->m_key_group_learn ){
++                m_mainperf->set_mode_group_learn();
++            }           
++
++            if( m_mainperf->get_key_groups()->count( a_ev->keyval) != 0 ){
++                m_mainperf->select_and_mute_group( (*m_mainperf->get_key_groups())[a_ev->keyval] );
++            }
++           
++        
+             if ( a_ev->keyval == m_mainperf->m_key_start )
+             {
+                 if (is_pattern_playing)
+diff -rupN seq24-0.9.0/src/optionsfile.cpp seq24-0.9.0+letz+af/src/optionsfile.cpp
+--- seq24-0.9.0/src/optionsfile.cpp	2008-09-07 14:38:48.000000000 +0200
++++ seq24-0.9.0+letz+af/src/optionsfile.cpp	2009-03-18 21:36:04.000000000 +0100
+@@ -88,7 +88,36 @@ optionsfile::parse( perform *a_perf )
+          
+         next_data_line( &file );
+     }
++    /* group midi control */
++    line_after( &file, "[mute-group]");
+ 
++    int gtrack = 0;
++    sscanf( m_line, "%d", &gtrack );
++    next_data_line( &file );
++   
++    int mtx[c_seqs_in_set], j=0;
++    for (int i=0; i< c_seqs_in_set; i++) {
++        a_perf->select_group_mute(j);
++        sscanf (m_line, "%d [%d %d %d %d %d %d %d %d] [%d %d %d %d %d %d %d %d] [%d %d %d %d %d %d %d %d] [%d %d %d %d %d %d %d %d]",
++            &j,
++            &mtx[0], &mtx[1], &mtx[2], &mtx[3],
++            &mtx[4], &mtx[5], &mtx[6], &mtx[7],
++           
++            &mtx[8], &mtx[9], &mtx[10], &mtx[11],
++            &mtx[12], &mtx[13], &mtx[14], &mtx[15],
++             
++            &mtx[16], &mtx[17], &mtx[18], &mtx[19],
++            &mtx[20], &mtx[21], &mtx[22], &mtx[23],
++             
++            &mtx[24], &mtx[25], &mtx[26], &mtx[27],
++            &mtx[28], &mtx[29], &mtx[30], &mtx[31]);
++        for (int k=0; k< c_seqs_in_set; k++) {
++            a_perf->set_group_mute_state(k, mtx[k]);
++        }
++        j++;
++        next_data_line( &file );
++    }
++ 
+     line_after( &file, "[midi-clock]" );
+     long buses = 0;
+     sscanf( m_line, "%ld", &buses );
+@@ -118,20 +147,45 @@ optionsfile::parse( perform *a_perf )
+         a_perf->key_events[key] = seq;
+         next_data_line( &file );
+     }
++    line_after( &file, "[keyboard-group]" );
++    long groups = 0;
++    sscanf( m_line, "%ld", &groups );
++    next_data_line( &file );
++
++    a_perf->key_groups.clear();
++   
++   
++    for ( int i=0; i<groups; ++i ){
++       
++        long key = 0, group = 0;
++        sscanf( m_line, "%ld %ld", &key, &group );
++        a_perf->key_groups[key] = group;
++        next_data_line( &file );
++    }
++
+ 
+     sscanf( m_line, "%u %u", &a_perf->m_key_bpm_up,
+                              &a_perf->m_key_bpm_dn );
+     next_data_line( &file );
+-
+-    sscanf( m_line, "%u %u", &a_perf->m_key_screenset_up,
+-                             &a_perf->m_key_screenset_dn );
++    sscanf( m_line, "%u %u %u", &a_perf->m_key_screenset_up,
++                             &a_perf->m_key_screenset_dn,
++                             &a_perf->m_key_set_playing_screenset);
++   
++
++     next_data_line( &file );
++
++    sscanf( m_line, "%u %u %u", &a_perf->m_key_group_on,
++                              &a_perf->m_key_group_off,
++                             &a_perf->m_key_group_learn);
++   
+     next_data_line( &file );
+ 
+-    sscanf( m_line, "%u %u %u %u",
++    sscanf( m_line, "%u %u %u %u %u",
+             &a_perf->m_key_replace,
+             &a_perf->m_key_queue,
+             &a_perf->m_key_snapshot_1,
+-            &a_perf->m_key_snapshot_2 );
++            &a_perf->m_key_snapshot_2,
++            &a_perf->m_key_keep_queue);
+ 
+     line_after( &file, "[jack-transport]" );
+     long flag = 0;
+@@ -215,13 +269,20 @@ optionsfile::write( perform *a_perf  )
+ 
+         switch( i ){
+ 
+-            case c_midi_control_bpm_up       :  file << "# bpm up\n"; break;
++            /* 32 mute for channel
++               32 group mute */
++            case c_seqs_in_set               :  file << "# mute in group\n"; break;
++           case c_midi_control_bpm_up       :  file << "# bpm up\n"; break;
+             case c_midi_control_bpm_dn       :  file << "# bpm down\n"; break;
+             case c_midi_control_ss_up        :  file << "# screen set up\n"; break;
+             case c_midi_control_ss_dn        :  file << "# screen set down\n"; break;
+             case c_midi_control_mod_replace  :  file << "# mod replace\n"; break;
+             case c_midi_control_mod_snapshot :  file << "# mod snapshot\n"; break;
+             case c_midi_control_mod_queue    :  file << "# mod queue\n"; break;
++            case c_midi_control_mod_gmute    :  file << "# mod gmute\n"; break;
++            case c_midi_control_mod_glearn   :  file << "# mod glearn\n"; break;
++            case c_midi_control_play_ss      :  file << "# screen set play\n"; break;
++           
+ 
+             default: break;
+         }
+@@ -254,6 +315,33 @@ optionsfile::write( perform *a_perf  )
+ 
+         file << string(outs) << "\n";
+     }
++   
++    /* group midi control */
++    file << "\n\n\n[mute-group]\n";
++   
++    int mtx[c_seqs_in_set];
++    file <<  c_gmute_tracks << "\n";
++    for (int j=0; j < c_seqs_in_set; j++ ){
++        a_perf->select_group_mute(j);
++        for (int i=0; i < c_seqs_in_set; i++) {
++            mtx[i] = a_perf->get_group_mute_state(i);
++        }
++        sprintf (outs, "%d [%1d %1d %1d %1d %1d %1d %1d %1d] [%1d %1d %1d %1d %1d %1d %1d %1d] [%1d %1d %1d %1d %1d %1d %1d %1d] [%1d %1d %1d %1d %1d %1d %1d %1d]",
++            j,
++            mtx[0], mtx[1], mtx[2], mtx[3], mtx[4], mtx[5], 
++            mtx[6], mtx[7], mtx[8], mtx[9], mtx[10], mtx[11],
++
++            mtx[12], mtx[13], mtx[14], mtx[15], mtx[16],mtx[17], 
++            mtx[18], mtx[19], mtx[20], mtx[21], mtx[22],mtx[23],
++             
++            mtx[24], mtx[25], mtx[26], mtx[27], mtx[28], mtx[29],
++            mtx[30], mtx[31]), mtx[32], mtx[33], mtx[34], mtx[35]
++
++            mtx[36], mtx[37], mtx[38], mtx[39], mtx[40], mtx[41], 
++            mtx[42], mtx[43], mtx[44], mtx[45], mtx[46], mtx[47],
++
++            mtx[48], mtx[49], mtx[50], mtx[51], mtx[52],mtx[53], 
++            mtx[54], mtx[55], mtx[56], mtx[57], mtx[58],mtx[59];
++       
++        file << string(outs) << "\n";
++    }
+ 
+  
+ 
+@@ -311,23 +399,43 @@ optionsfile::write( perform *a_perf  )
+         sprintf( outs, "%ld  %ld", i->first, i->second );
+         file << string(outs) << "\n";
+     }
++    file << "\n\n\n[keyboard-group]\n";
++    file << "# Key #, group # \n";
++    file << c_seqs_in_set << "\n";
++
++    for( std::map<long,long>::iterator i = a_perf->key_groups.begin();
++         i != a_perf->key_groups.end(); ++i ){
++       
++        sprintf( outs, "%ld  %ld", i->first, i->second );
++        file << string(outs) << "\n";
++    }
+ 
+     file << "# bpm up, down\n"
+          << a_perf->m_key_bpm_up
+          << " "
+          << a_perf->m_key_bpm_dn << "\n";
+ 
+-    file << "# screen set up, down\n"
++    file << "# screen set up, down, play\n"
+          << a_perf->m_key_screenset_up
+          << " "
+          << a_perf->m_key_screenset_dn
+-         << "\n";
+-
+-    file << "# replace, queue, snapshot_1, snapshot 2\n"
++         << " "
++         << a_perf->m_key_set_playing_screenset
++        << "\n";
++    file << "# group on, off, learn\n"
++         << a_perf->m_key_group_on
++         << " "
++         << a_perf->m_key_group_off
++         << " "
++         << a_perf->m_key_group_learn << "\n";
++   
++    file << "# replace, queue, snapshot_1, snapshot 2, keep queue\n" 
+          << a_perf->m_key_replace << " "
+          << a_perf->m_key_queue << " "
+          << a_perf->m_key_snapshot_1 << " "
+-         << a_perf->m_key_snapshot_2 << "\n";
++         << a_perf->m_key_snapshot_2 << " "
++         << a_perf->m_key_keep_queue << "\n";
++   
+ 
+     file << "\n\n\n[jack-transport]\n\n"
+ 
+diff -rupN seq24-0.9.0/src/perform.cpp seq24-0.9.0+letz+af/src/perform.cpp
+--- seq24-0.9.0/src/perform.cpp	2008-09-07 12:54:09.000000000 +0200
++++ seq24-0.9.0+letz+af/src/perform.cpp	2009-03-18 22:08:57.000000000 +0100
+@@ -38,7 +38,8 @@ perform::perform()
+ 		
+ 		
+     }
+-
++    m_mute_group_selected = 0;
++    m_mode_group = true;
+     m_running = false;
+     m_looping = false;
+     m_inputing = true;
+@@ -92,7 +93,38 @@ perform::perform()
+     key_events[ GDK_i ] = 29;
+     key_events[ GDK_k ] = 30; 
+     key_events[ GDK_comma ] = 31;
+-
++    key_groups[ 33 ] = 0;
++    key_groups[ 34 ] = 1;
++    key_groups[ 163 ] = 2;
++    key_groups[ 36 ] = 3;
++    key_groups[ 37 ] = 4;
++    key_groups[ 38 ] = 5;
++    key_groups[ 47 ] = 6;
++    key_groups[ 40 ] = 7;
++    key_groups[ 81 ] = 8;
++    key_groups[ 87 ] = 9;
++    key_groups[ 69 ] = 10;
++    key_groups[ 82 ] = 11;
++    key_groups[ 84 ] = 12;
++    key_groups[ 89 ] = 13;
++    key_groups[ 85 ] = 14;
++    key_groups[ 73 ] = 15;
++    key_groups[ 65 ] = 16;
++    key_groups[ 83 ] = 17;
++    key_groups[ 68 ] = 18;
++    key_groups[ 70 ] = 19;
++    key_groups[ 71 ] = 20;
++    key_groups[ 72 ] = 21;
++    key_groups[ 74 ] = 22;
++    key_groups[ 75 ] = 23;
++    key_groups[ 90 ] = 24;
++    key_groups[ 88 ] = 25;
++    key_groups[ 67 ] = 26;
++    key_groups[ 86 ] = 27;
++    key_groups[ 66 ] = 28;
++    key_groups[ 78 ] = 29;
++    key_groups[ 77 ] = 30;
++    key_groups[ 59 ] = 31;
+     
+     m_key_bpm_up = GDK_apostrophe;
+     m_key_bpm_dn = GDK_semicolon;
+@@ -101,9 +133,14 @@ perform::perform()
+     m_key_queue = GDK_Control_R;
+     m_key_snapshot_1 = GDK_Alt_L;
+     m_key_snapshot_2 = GDK_Alt_R;
++    m_key_keep_queue = 92;
+     
+     m_key_screenset_up = GDK_bracketright;
+     m_key_screenset_dn = GDK_bracketleft;
++    m_key_set_playing_screenset = 65360;
++    m_key_group_on = 236;
++    m_key_group_off = 39;
++    m_key_group_learn = 65379;
+ 
+     m_key_start  = GDK_space;
+     m_key_stop   = GDK_Escape;
+@@ -145,17 +182,11 @@ perform::init_jack( void )
+             sprintf( client_name, "seq24 (%d)", getpid());
+             
+             /* become a new client of the JACK server */
+-            if (( m_jack_client = jack_client_new(client_name)) == 0) {
++            if (( m_jack_client = jack_client_open(client_name, JackNullOption, NULL)) == 0) {
+                 printf( "JACK server is not running.\n[JACK sync disabled]\n");
+                 m_jack_running = false;
+                 break;
+             }
+-            if (jack_activate(m_jack_client)) {
+-                printf("Cannot register as JACK client\n");
+-                m_jack_running = false;
+-                break;
+-            }
+-            
+             jack_on_shutdown( m_jack_client, jack_shutdown,(void *) this );
+             jack_set_sync_callback(m_jack_client, jack_sync_callback, (void *) this );
+ 
+@@ -173,7 +204,13 @@ perform::init_jack( void )
+                 m_jack_master = false;
+              
+             }
++             if (jack_activate(m_jack_client)) {
++                printf("Cannot register as JACK client\n");
++                m_jack_running = false;
++                break;
++            }
+             
++           
+         } while (0);
+         
+     } 
+@@ -243,8 +280,119 @@ perform::clear_all( void )
+     }
+ 
+ }
++	void
++	perform::set_mode_group_mute ()
++	{
++    m_mode_group = true;
++    return;
++	}
+ 
++	void
++	perform::unset_mode_group_mute ()
++	{
++    m_mode_group = false;
++    return;
++	}
+ 
++	void
++	perform::set_group_mute_state (int a_g_track, bool a_mute_state)
++	{
++    if (a_g_track < 0)
++        a_g_track = 0;
++    if (a_g_track > c_seqs_in_set)
++        a_g_track = c_seqs_in_set -1;
++    m_mute_group[a_g_track + m_mute_group_selected * c_seqs_in_set] = a_mute_state;
++    return;
++	}
++
++	bool
++	perform::get_group_mute_state (int a_g_track)
++	{
++    if (a_g_track < 0)
++        a_g_track = 0;
++    if (a_g_track > c_seqs_in_set)
++        a_g_track = c_seqs_in_set -1;
++    return m_mute_group[a_g_track + m_mute_group_selected * c_seqs_in_set];
++	}
++
++	void
++	perform::select_group_mute (int a_g_mute)
++	{
++    int j = (a_g_mute * c_seqs_in_set);
++    int k = m_playing_screen * c_seqs_in_set;
++    if (a_g_mute < 0)
++        a_g_mute = 0;
++    if (a_g_mute > c_seqs_in_set)
++        a_g_mute = c_seqs_in_set -1;
++    if (m_mode_group_learn)
++        for (int i = 0; i < c_seqs_in_set; i++) {
++            if (is_active(i + k)) {
++                assert(m_seqs[i + k]);
++                m_mute_group[i + j] = m_seqs[i + k]->get_playing();
++            }
++        }
++    m_mute_group_selected = a_g_mute;
++    return;
++	}
++	void perform::set_mode_group_learn (void)
++	{
++    set_mode_group_mute();
++    m_mode_group_learn = true;
++    return;
++	}
++
++	void perform::unset_mode_group_learn (void)
++	{
++    m_mode_group_learn = false;
++    return;
++	}
++
++	void
++	perform::select_mute_group ( int a_group )
++	{
++    int j = (a_group * c_seqs_in_set);
++    int k = m_playing_screen * c_seqs_in_set;
++    if (a_group < 0)
++        a_group = 0;
++    if (a_group > c_seqs_in_set)
++        a_group = c_seqs_in_set -1;
++    m_mute_group_selected = a_group;
++    for (int i = 0; i < c_seqs_in_set; i++) {
++        if ((m_mode_group_learn) && (is_active(i + k))) {
++            assert(m_seqs[i + k]);
++            m_mute_group[i + j] = m_seqs[i + k]->get_playing();
++        }
++        m_tracks_mute_state[i] = m_mute_group[i + m_mute_group_selected * c_seqs_in_set];
++    }
++    return;
++	}
++
++	void
++	perform::mute_group_tracks (void)
++	{
++    if (m_mode_group) {
++        for (int i=0; i< c_seqs_in_set; i++) {
++            for (int j=0; j < c_seqs_in_set; j++) {
++                if ( is_active(i * c_seqs_in_set + j) ) {
++                    if ((i == m_playing_screen) && (m_tracks_mute_state[j])) {
++                            sequence_playing_on (i * c_seqs_in_set + j);
++                    } else {
++                        sequence_playing_off (i * c_seqs_in_set + j);
++                    }
++                }
++            }
++               
++        }
++    }
++	}
++
++	void
++	perform::select_and_mute_group (int a_g_group)
++	{
++    select_mute_group(a_g_group);
++    mute_group_tracks();
++    return;
++	}
+ 
+ void
+ perform::mute_all_tracks( void )
+@@ -627,6 +775,26 @@ perform::get_screenset( void )
+ {
+     return m_screen_set;
+ }
++ void
++ perform::set_playing_screenset (void)
++ {
++    for (int j, i = 0; i < c_seqs_in_set; i++) {
++        j = i + m_playing_screen * c_seqs_in_set;
++        if ( is_active(j) ){
++            assert( m_seqs[j] );
++            m_tracks_mute_state[i] = m_seqs[j]->get_playing();
++        }
++    }
++    m_playing_screen = m_screen_set;
++    mute_group_tracks();
++ }
++
++ int
++ perform::get_playing_screenset (void)
++ {
++    return m_playing_screen;
++ }
++
+ 
+ void 
+ perform::set_offset( int a_offset ) 
+@@ -1637,11 +1805,43 @@ perform::handle_midi_control( int a_cont
+                 set_sequence_control_status( c_status_queue );
+             else
+                 unset_sequence_control_status( c_status_queue );
++        //andy cases
++        case c_midi_control_mod_gmute:
++
++            printf ( "gmute\n" );
++           
++            if (a_state)
++                set_mode_group_mute();
++            else
++                unset_mode_group_mute();
+             break;
+-            
+-        default:
++           
++        case c_midi_control_mod_glearn:
++
++            //printf ( "glearn\n" );
++
++            if (a_state)
++                set_mode_group_learn();
++            else
++                unset_mode_group_learn();
++            break;
++           
++        case c_midi_control_play_ss:
++
++            //printf ( "play_ss\n" );
++
++            set_playing_screenset();
++            break;
++           
++         default:
++            if ((a_control >= c_seqs_in_set) && (a_control < c_midi_track_ctrl)) {
++                //printf ( "group mute\n" );
++           
++                select_and_mute_group(a_control - c_seqs_in_set);
++            }
+             break;
+             
++             
+     }
+ }
+ 
+@@ -1844,8 +2044,21 @@ void
+ perform::sequence_playing_on( int a_sequence )
+ {
+     if ( is_active(a_sequence) == true ){
++        if (m_mode_group && (m_playing_screen == m_screen_set)
++          && (a_sequence >= (m_playing_screen * c_seqs_in_set))
++          && (a_sequence < ((m_playing_screen + 1) * c_seqs_in_set)))
++            m_tracks_mute_state[a_sequence - m_playing_screen * c_seqs_in_set] = true;
+ 		assert( m_seqs[a_sequence] );
+-		m_seqs[a_sequence]->set_playing(true);
++        if (!(m_seqs[a_sequence]->get_playing())) {
++            if (m_control_status & c_status_queue ) {
++                if (!(m_seqs[a_sequence]->get_queued()))
++                    m_seqs[a_sequence]->toggle_queued();
++            } else
++                m_seqs[a_sequence]->set_playing(true);
++        } else {
++            if ((m_seqs[a_sequence]->get_queued()) && (m_control_status & c_status_queue ))
++                m_seqs[a_sequence]->toggle_queued();
++        }
+     } 
+ }
+ 
+@@ -1854,8 +2067,21 @@ void
+ perform::sequence_playing_off( int a_sequence )
+ {
+     if ( is_active(a_sequence) == true ){
+-		assert( m_seqs[a_sequence] );
+-		m_seqs[a_sequence]->set_playing(false);
++        if (m_mode_group && (m_playing_screen == m_screen_set)
++          && (a_sequence >= (m_playing_screen * c_seqs_in_set))
++          && (a_sequence < ((m_playing_screen + 1) * c_seqs_in_set)))
++            m_tracks_mute_state[a_sequence - m_playing_screen * c_seqs_in_set] = false;
++        assert( m_seqs[a_sequence] );
++        if (m_seqs[a_sequence]->get_playing()) {
++            if (m_control_status & c_status_queue ) {
++                if (!(m_seqs[a_sequence]->get_queued()))
++                    m_seqs[a_sequence]->toggle_queued();
++            } else
++                m_seqs[a_sequence]->set_playing(false);
++        } else {
++            if ((m_seqs[a_sequence]->get_queued()) && (m_control_status & c_status_queue ))
++                m_seqs[a_sequence]->toggle_queued();
++        }
+     } 
+ }
+ 
+diff -rupN seq24-0.9.0/src/perform.h seq24-0.9.0+letz+af/src/perform.h
+--- seq24-0.9.0/src/perform.h	2008-09-07 14:32:48.000000000 +0200
++++ seq24-0.9.0+letz+af/src/perform.h	2009-03-18 21:50:07.000000000 +0100
+@@ -57,18 +57,34 @@ const int c_status_replace  = 0x01;
+ const int c_status_snapshot = 0x02;
+ const int c_status_queue    = 0x04;
+ 
+-const int c_midi_control_bpm_up       = c_seqs_in_set ;
+-const int c_midi_control_bpm_dn       = c_seqs_in_set + 1;
+-const int c_midi_control_ss_up        = c_seqs_in_set + 2;
+-const int c_midi_control_ss_dn        = c_seqs_in_set + 3;
+-const int c_midi_control_mod_replace  = c_seqs_in_set + 4;
+-const int c_midi_control_mod_snapshot = c_seqs_in_set + 5;
+-const int c_midi_control_mod_queue    = c_seqs_in_set + 6;
+-const int c_midi_control_ss_0    = c_seqs_in_set + 7;
+-const int c_midi_control_ss_1    = c_seqs_in_set + 8;
+-const int c_midi_control_ss_2    = c_seqs_in_set + 9;
+-const int c_midi_control_ss_3    = c_seqs_in_set + 10;
+-const int c_midi_control_ss_4    = c_seqs_in_set + 11;
+-const int c_midi_control_ss_5    = c_seqs_in_set + 12;
+-const int c_midi_control_ss_6    = c_seqs_in_set + 13;
+-const int c_midi_control_ss_7    = c_seqs_in_set + 14;
+-const int c_midi_control_ss_8    = c_seqs_in_set + 15;
+-const int c_midi_control_ss_9    = c_seqs_in_set + 16;
+-const int c_midi_control_ss_10    = c_seqs_in_set + 17;
+-const int c_midi_control_ss_11    = c_seqs_in_set + 18;
+-const int c_midi_control_ss_12    = c_seqs_in_set + 19;
+-const int c_midi_control_ss_13    = c_seqs_in_set + 20;
+-const int c_midi_control_ss_14    = c_seqs_in_set + 21;
+-const int c_midi_control_ss_15    = c_seqs_in_set + 22;
+-const int c_midi_control_ss_16    = c_seqs_in_set + 23;
+-const int c_midi_control_ss_17    = c_seqs_in_set + 24;
+-const int c_midi_control_ss_18    = c_seqs_in_set + 25;
+-const int c_midi_control_ss_19    = c_seqs_in_set + 26;
+-const int c_midi_control_ss_20    = c_seqs_in_set + 27;
+-const int c_midi_control_ss_21    = c_seqs_in_set + 28;
+-const int c_midi_control_ss_22    = c_seqs_in_set + 29;
+-const int c_midi_control_ss_23    = c_seqs_in_set + 30;
+-const int c_midi_control_ss_24    = c_seqs_in_set + 31;
+-const int c_midi_control_ss_25    = c_seqs_in_set + 32;
+-const int c_midi_control_ss_26    = c_seqs_in_set + 33;
+-const int c_midi_control_ss_27    = c_seqs_in_set + 34;
+-const int c_midi_control_ss_28    = c_seqs_in_set + 35;
+-const int c_midi_control_ss_29    = c_seqs_in_set + 36;
+-const int c_midi_control_ss_30    = c_seqs_in_set + 37;
+-const int c_midi_control_ss_31    = c_seqs_in_set + 38;
+-const int c_midi_control_ss_32    = c_seqs_in_set + 39;
+-const int c_midi_control_playfrombeg    = c_seqs_in_set + 40;
+-const int c_midi_control_stop   = c_seqs_in_set + 41;
+-const int c_midi_controls             = c_seqs_in_set + 42;
+-const int c_midi_controls             = c_seqs_in_set + 7;
++	 const int c_midi_track_ctrl = c_seqs_in_set * 2;
++	 const int c_midi_control_bpm_up       = c_midi_track_ctrl ;
++	 const int c_midi_control_bpm_dn       = c_midi_track_ctrl + 1;
++	 const int c_midi_control_ss_up        = c_midi_track_ctrl + 2;
++	 const int c_midi_control_ss_dn        = c_midi_track_ctrl + 3;
++	 const int c_midi_control_mod_replace  = c_midi_track_ctrl + 4;
++	 const int c_midi_control_mod_snapshot = c_midi_track_ctrl + 5;
++	 const int c_midi_control_mod_queue    = c_midi_track_ctrl + 6;
++	 const int c_midi_control_ss_0    = c_seqs_in_set + 7;
++	 const int c_midi_control_ss_1    = c_seqs_in_set + 8;
++	 const int c_midi_control_ss_2    = c_seqs_in_set + 9;
++	 const int c_midi_control_ss_3    = c_seqs_in_set + 10;
++	 const int c_midi_control_ss_4    = c_seqs_in_set + 11;
++	 const int c_midi_control_ss_5    = c_seqs_in_set + 12;
++	 const int c_midi_control_ss_6    = c_seqs_in_set + 13;
++	 const int c_midi_control_ss_7    = c_seqs_in_set + 14;
++	 const int c_midi_control_ss_8    = c_seqs_in_set + 15;
++	 const int c_midi_control_ss_9    = c_seqs_in_set + 16;
++	 const int c_midi_control_ss_10    = c_seqs_in_set + 17;
++	 const int c_midi_control_ss_11    = c_seqs_in_set + 18;
++	 const int c_midi_control_ss_12    = c_seqs_in_set + 19;
++	 const int c_midi_control_ss_13    = c_seqs_in_set + 20;
++	 const int c_midi_control_ss_14    = c_seqs_in_set + 21;
++	 const int c_midi_control_ss_15    = c_seqs_in_set + 22;
++	 const int c_midi_control_ss_16    = c_seqs_in_set + 23;
++	 const int c_midi_control_ss_17    = c_seqs_in_set + 24;
++	 const int c_midi_control_ss_18    = c_seqs_in_set + 25;
++	 const int c_midi_control_ss_19    = c_seqs_in_set + 26;
++	 const int c_midi_control_ss_20    = c_seqs_in_set + 27;
++	 const int c_midi_control_ss_21    = c_seqs_in_set + 28;
++	 const int c_midi_control_ss_22    = c_seqs_in_set + 29;
++	 const int c_midi_control_ss_23    = c_seqs_in_set + 30;
++	 const int c_midi_control_ss_24    = c_seqs_in_set + 31;
++	 const int c_midi_control_ss_25    = c_seqs_in_set + 32;
++	 const int c_midi_control_ss_26    = c_seqs_in_set + 33;
++	 const int c_midi_control_ss_27    = c_seqs_in_set + 34;
++	 const int c_midi_control_ss_28    = c_seqs_in_set + 35;
++	 const int c_midi_control_ss_29    = c_seqs_in_set + 36;
++	 const int c_midi_control_ss_30    = c_seqs_in_set + 37;
++	 const int c_midi_control_ss_31    = c_seqs_in_set + 38;
++	 const int c_midi_control_ss_32    = c_seqs_in_set + 39;
++	 const int c_midi_control_playfrombeg    = c_seqs_in_set + 40;
++	 const int c_midi_control_stop   = c_seqs_in_set + 41;
++	 //andy midi_control_mod_mute_group
++	 const int c_midi_control_mod_gmute    = c_midi_track_ctrl + 42;
++	 //andy learn_mute_toggle_mode
++	 const int c_midi_control_mod_glearn   = c_midi_track_ctrl + 43;
++	 //andy play only this screen set
++	 const int c_midi_control_play_ss      = c_midi_track_ctrl + 44;
++	 const int c_midi_controls             = c_midi_track_ctrl + 45;//7
+ 
+ class perform
+ {
+  private:
++    //andy mute group
++    bool m_mute_group[c_gmute_tracks];
++    bool m_tracks_mute_state[c_seqs_in_set];
++    bool m_mode_group;
++    bool m_mode_group_learn;
++    int m_mute_group_selected;
++    //andy playing screen
++    int m_playing_screen;
++   
+ 
+     /* vector of sequences */
+     sequence *m_seqs[c_max_sequence];
+@@ -124,6 +140,8 @@ class perform
+     condition_var m_condition_var;
+ 
+     std::map<long,long> key_events;
++    std::map<long,long> key_groups;
++
+ 
+ #ifdef JACK_SUPPORT
+     
+@@ -150,11 +168,18 @@ class perform
+ 
+     unsigned int m_key_replace;
+     unsigned int m_key_queue;
++    unsigned int m_key_keep_queue;
+     unsigned int m_key_snapshot_1;
+     unsigned int m_key_snapshot_2;
+ 
+     unsigned int m_key_screenset_up;
+     unsigned int m_key_screenset_dn;
++    unsigned int m_key_set_playing_screenset;
++   
++    unsigned int m_key_group_on;
++    unsigned int m_key_group_off;
++    unsigned int m_key_group_learn;
++   
+ 
+     unsigned int m_key_start; 
+     unsigned int m_key_stop;
+@@ -209,7 +234,16 @@ class perform
+ 
+     void set_screenset( int a_ss );
+     int get_screenset( void );
+-    
++    void set_playing_screenset( void );
++    int get_playing_screenset( void );
++    void mute_group_tracks (void);
++    void select_and_mute_group (int a_g_group);
++    void set_mode_group_mute ();
++    void select_group_mute (int a_g_mute);
++    void set_mode_group_learn (void);
++    void unset_mode_group_learn (void);
++    void select_mute_group ( int a_group );
++    void unset_mode_group_mute ();    
+     void start( bool a_state );
+     void stop();
+ 
+@@ -248,6 +282,8 @@ class perform
+     void sequence_playing_toggle( int a_sequence );
+     void sequence_playing_on( int a_sequence );
+     void sequence_playing_off( int a_sequence );
++    void set_group_mute_state (int a_g_track, bool a_mute_state);
++    bool get_group_mute_state (int a_g_track);
+     
+     void mute_all_tracks( void );
+ 
+@@ -265,6 +301,7 @@ class perform
+     
+     
+     std::map<long,long> *get_key_events( void ){ return &key_events; };
++    std::map<long,long> *get_key_groups( void ){ return &key_groups; };
+ 
+ 
+     friend class midifile;
+diff -rupN seq24-0.9.0/src/sequence.cpp seq24-0.9.0+letz+af/src/sequence.cpp
+--- seq24-0.9.0/src/sequence.cpp	2008-09-07 13:17:27.000000000 +0200
++++ seq24-0.9.0+letz+af/src/sequence.cpp	2009-03-18 21:51:53.000000000 +0100
+@@ -1612,10 +1612,10 @@ sequence::stream_event(  event *a_ev  )
+     link_new();
+ 
+     if ( m_quanized_rec ){
+-	if (a_ev->is_note_off()) {
+-	    select_note_events( a_ev->get_timestamp(), a_ev->get_note(), 
+-			        a_ev->get_timestamp(), a_ev->get_note(), e_select);
+-            quanize_events( EVENT_NOTE_ON, 0, m_snap_tick, 1 , true );
++        if (a_ev->is_note_off()) {
++           select_note_events( a_ev->get_timestamp(), a_ev->get_note(),
++             a_ev->get_timestamp(), a_ev->get_note(), e_select);
++           quanize_events( EVENT_NOTE_ON, 0, m_snap_tick, 1 , true );
+ 	    
+ 	}
+     }
+diff -rupN seq24-0.9.0/src/userfile.cpp seq24-0.9.0+letz+af/src/userfile.cpp
+--- seq24-0.9.0/src/userfile.cpp	2008-09-07 12:54:09.000000000 +0200
++++ seq24-0.9.0+letz+af/src/userfile.cpp	2009-03-18 21:54:22.000000000 +0100
+@@ -174,9 +174,27 @@ userfile::parse( perform *a_perf )
+         a_perf->key_events[key] = seq;
+         next_data_line( &file );
+     }
++    line_after( &file, "[keyboard-group]" );
++    long keys = 0;
++    sscanf( m_line, "%ld", &keys );
++    next_data_line( &file );
++
++    a_perf->key_groups.clear();
++   
++   
++    for ( int i=0; i<keys; ++i ){
++       
++        long key = 0, group = 0;
++        sscanf( m_line, "%ld %ld", &key, &group );
++        a_perf->key_groups[key] = group;
++        next_data_line( &file );
++    }
++
++
+ 
+-    sscanf( m_line, "%ld %ld", &a_perf->m_key_bpm_up,
+-                             &a_perf->m_key_bpm_dn );
++    sscanf( m_line, "%ld %ld %ld", &a_perf->m_key_screenset_up,
++                             &a_perf->m_key_screenset_dn,
++                             &a_perf->m_key_set_playing_screenset);
+     next_data_line( &file );
+ 
+     sscanf( m_line, "%ld %ld", &a_perf->m_key_screenset_up,
+@@ -187,7 +205,8 @@ userfile::parse( perform *a_perf )
+             &a_perf->m_key_replace,
+             &a_perf->m_key_queue,
+             &a_perf->m_key_snapshot_1,
+-            &a_perf->m_key_snapshot_2 );
++            &a_perf->m_key_snapshot_2,
++            &a_perf->m_key_keep_queue);
+ 
+     line_after( &file, "[jack-transport]" );
+     long flag = 0;

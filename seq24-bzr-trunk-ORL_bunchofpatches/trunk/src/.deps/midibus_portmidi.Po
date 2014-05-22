@@ -1,0 +1,3 @@
+midibus_portmidi.o: midibus_portmidi.cpp midibus_portmidi.h
+
+midibus_portmidi.h:
