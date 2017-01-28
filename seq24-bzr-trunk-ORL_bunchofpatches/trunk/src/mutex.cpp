@@ -19,23 +19,23 @@
 //-----------------------------------------------------------------------------
 #include "mutex.h"
 
-const pthread_mutex_t mutex::recmutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
+const pthread_mutex_t smutex::recmutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 const pthread_cond_t condition_var::cond  = PTHREAD_COND_INITIALIZER;
 
-mutex::mutex( )
+smutex::smutex( )
 {
     m_mutex_lock = recmutex;
 }
 
 void 
-mutex::lock( )
+smutex::lock( )
 {
     pthread_mutex_lock( &m_mutex_lock );
 }
 
 
 void 
-mutex::unlock( )
+smutex::unlock( )
 {      
     pthread_mutex_unlock( &m_mutex_lock );
 }

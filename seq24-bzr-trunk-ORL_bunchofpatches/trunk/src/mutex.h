@@ -24,7 +24,7 @@
 #include "globals.h"
 #include <pthread.h>
 
-class mutex {
+class smutex {
     
 private:
 
@@ -37,14 +37,14 @@ protected:
     
 public:
     
-    mutex();
+    smutex();
 
     void lock();
     void unlock();
 
 };
 
-class condition_var : public mutex {
+class condition_var : public smutex {
 
 private:
 

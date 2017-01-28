@@ -151,7 +151,7 @@ class sequence
     long m_rec_vol;
 
     /* locking */
-    mutex m_mutex;
+    smutex m_mutex;
 
     /* used to idenfity which events are ours in the out queue */
     //unsigned char m_tag;

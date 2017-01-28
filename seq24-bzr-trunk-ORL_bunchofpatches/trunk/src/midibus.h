@@ -91,7 +91,7 @@ class midibus
 
 
     /* locking */
-    mutex m_mutex;
+    smutex m_mutex;
 
     /* mutex */
     void lock();
@@ -209,7 +209,7 @@ class mastermidibus
     sequence *m_seq;
 
     /* locking */
-    mutex m_mutex;
+    smutex m_mutex;
 
     /* mutex */
     void lock();
