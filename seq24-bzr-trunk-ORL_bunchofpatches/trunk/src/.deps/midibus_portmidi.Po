@@ -1,3 +1,6 @@
-midibus_portmidi.o: midibus_portmidi.cpp midibus_portmidi.h
+midibus_portmidi.o: midibus_portmidi.cpp /usr/include/stdc-predef.h \
+ midibus_portmidi.h
+
+/usr/include/stdc-predef.h:
 
 midibus_portmidi.h:

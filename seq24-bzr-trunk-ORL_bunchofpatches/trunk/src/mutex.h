@@ -22,7 +22,6 @@
 #define SEQ24_MUTEX
 
 #include "globals.h"
-
 #include <pthread.h>
 
 class mutex {
